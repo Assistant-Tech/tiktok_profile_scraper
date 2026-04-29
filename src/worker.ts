@@ -1,5 +1,5 @@
 import { spawn, ChildProcessWithoutNullStreams } from "child_process";
-import { createInterface, Interface } from "readline";
+import { createInterface } from "readline";
 import { randomUUID } from "crypto";
 import { config } from "./config";
 import { logger } from "./logger";
@@ -57,7 +57,6 @@ class PythonWorker {
     });
 
     const rl = createInterface({ input: child.stdout });
-    this.rl = rl;
     rl.on("line", (line) => this.handleLine(line));
 
     child.on("exit", (code, signal) => {
@@ -67,7 +66,6 @@ class PythonWorker {
       );
       this.ready = false;
       this.child = null;
-      this.rl = null;
       this.readyPromise = null;
       if (this.restartCount < 10) {
         this.restartCount++;
