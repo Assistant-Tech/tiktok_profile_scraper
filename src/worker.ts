@@ -1,9 +1,9 @@
-import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
-import { createInterface, Interface } from 'readline';
-import { randomUUID } from 'crypto';
-import { config } from './config';
-import { logger } from './logger';
-import { ScrapedProfile } from './types';
+import { spawn, ChildProcessWithoutNullStreams } from "child_process";
+import { createInterface, Interface } from "readline";
+import { randomUUID } from "crypto";
+import { config } from "./config";
+import { logger } from "./logger";
+import { ScrapedProfile } from "./types";
 
 interface WorkerResponse {
   id?: string;
@@ -21,7 +21,6 @@ interface PendingRequest {
 
 class PythonWorker {
   private child: ChildProcessWithoutNullStreams | null = null;
-  private rl: Interface | null = null;
   private pending = new Map<string, PendingRequest>();
   private ready = false;
   private readyPromise: Promise<void> | null = null;
@@ -37,46 +36,51 @@ class PythonWorker {
   private spawn(): Promise<void> {
     const args = [
       config.PYTHON_WORKER_PATH,
-      '--timeout',
+      "--timeout",
       String(Math.floor(config.NAV_TIMEOUT_MS / 1000)),
-      '--user-agent',
+      "--user-agent",
       config.USER_AGENT,
     ];
     if (config.EXECUTABLE_PATH) {
-      args.push('--executable-path', config.EXECUTABLE_PATH);
+      args.push("--executable-path", config.EXECUTABLE_PATH);
     }
 
-    logger.info({ args }, 'spawning python worker');
+    logger.info({ args }, "spawning python worker");
     const child = spawn(config.PYTHON_BIN, args, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, PYTHONUNBUFFERED: '1' },
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, PYTHONUNBUFFERED: "1" },
     });
     this.child = child;
 
-    child.stderr.on('data', (d: Buffer) => {
-      logger.debug({ src: 'py' }, d.toString('utf8').trimEnd());
+    child.stderr.on("data", (d: Buffer) => {
+      logger.debug({ src: "py" }, d.toString("utf8").trimEnd());
     });
 
     const rl = createInterface({ input: child.stdout });
     this.rl = rl;
-    rl.on('line', (line) => this.handleLine(line));
+    rl.on("line", (line) => this.handleLine(line));
 
-    child.on('exit', (code, signal) => {
-      logger.warn({ code, signal }, 'python worker exited');
-      this.failAllPending(new Error(`worker exited code=${code} signal=${signal}`));
+    child.on("exit", (code, signal) => {
+      logger.warn({ code, signal }, "python worker exited");
+      this.failAllPending(
+        new Error(`worker exited code=${code} signal=${signal}`),
+      );
       this.ready = false;
       this.child = null;
       this.rl = null;
       this.readyPromise = null;
       if (this.restartCount < 10) {
         this.restartCount++;
-        setTimeout(() => void this.start(), Math.min(5000, 500 * this.restartCount));
+        setTimeout(
+          () => void this.start(),
+          Math.min(5000, 500 * this.restartCount),
+        );
       }
     });
 
     return new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
-        if (!this.ready) reject(new Error('worker ready timeout'));
+        if (!this.ready) reject(new Error("worker ready timeout"));
       }, 30_000);
       this.onReady = () => {
         clearTimeout(timer);
@@ -95,10 +99,10 @@ class PythonWorker {
     try {
       resp = JSON.parse(line) as WorkerResponse;
     } catch (err) {
-      logger.warn({ line, err }, 'invalid worker output');
+      logger.warn({ line, err }, "invalid worker output");
       return;
     }
-    if (resp.event === 'ready') {
+    if (resp.event === "ready") {
       this.onReady();
       return;
     }
@@ -124,17 +128,17 @@ class PythonWorker {
   async request(username: string): Promise<WorkerResponse> {
     await this.start();
     if (!this.child || !this.ready) {
-      throw new Error('worker not ready');
+      throw new Error("worker not ready");
     }
 
     const id = randomUUID();
-    const payload = JSON.stringify({ id, username }) + '\n';
+    const payload = JSON.stringify({ id, username }) + "\n";
 
     return new Promise<WorkerResponse>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         this.busy = false;
-        reject(new Error('request timeout'));
+        reject(new Error("request timeout"));
       }, config.REQUEST_TIMEOUT_MS);
 
       this.pending.set(id, { resolve, reject, timer });
@@ -159,7 +163,7 @@ class PythonWorker {
       this.child.stdin.end();
       const child = this.child;
       setTimeout(() => {
-        if (!child.killed) child.kill('SIGKILL');
+        if (!child.killed) child.kill("SIGKILL");
       }, 3000).unref();
     }
   }
