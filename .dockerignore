@@ -1,0 +1,10 @@
+node_modules
+dist
+.git
+.gitignore
+.env
+*.log
+README.md
+python/.venv
+**/__pycache__
+scripts
