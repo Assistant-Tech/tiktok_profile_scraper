@@ -4,6 +4,7 @@ export interface ScrapedProfile {
   avatar_url: string | null;
   bio: string | null;
   verified: boolean;
+  private: boolean;
   follower_count: number | null;
   following_count: number | null;
   like_count: number | null;
@@ -24,7 +25,12 @@ export interface ErrorResponse {
 export class ScrapeError extends Error {
   constructor(
     message: string,
-    public readonly code: 'WAF_BLOCKED' | 'PROFILE_NOT_FOUND' | 'SCRAPE_ERROR' | 'TIMEOUT',
+    public readonly code:
+      | 'WAF_BLOCKED'
+      | 'PROFILE_NOT_FOUND'
+      | 'PROFILE_RESTRICTED'
+      | 'SCRAPE_ERROR'
+      | 'TIMEOUT',
   ) {
     super(message);
     this.name = 'ScrapeError';

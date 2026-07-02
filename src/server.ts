@@ -3,7 +3,7 @@ import pinoHttp from 'pino-http';
 import pLimit from 'p-limit';
 import { config } from './config';
 import { logger } from './logger';
-import { profileCache, negativeCache } from './cache';
+import { cache } from './cache';
 import { normalizeUsername, scrapeProfile } from './scraper';
 import { workerPool } from './worker';
 import { ProfileResponse, ScrapeError } from './types';
@@ -40,7 +40,7 @@ app.get('/profile/:username', requireToken, async (req, res) => {
     return;
   }
 
-  const negative = negativeCache.get(cleaned);
+  const negative = await cache.getNegative(cleaned);
   if (negative === 'WAF') {
     res.status(503).json({ error: 'service_unavailable', detail: 'WAF_BLOCKED' });
     return;
@@ -49,8 +49,12 @@ app.get('/profile/:username', requireToken, async (req, res) => {
     res.status(404).json({ error: 'not_found', detail: 'PROFILE_NOT_FOUND' });
     return;
   }
+  if (negative === 'RESTRICTED') {
+    res.status(403).json({ error: 'forbidden', detail: 'PROFILE_RESTRICTED' });
+    return;
+  }
 
-  const cached = profileCache.get(cleaned);
+  const cached = await cache.getProfile(cleaned);
   if (cached) {
     const body: ProfileResponse = { profile: cached, cached: true, elapsed_ms: 0 };
     res.json(body);
@@ -60,7 +64,7 @@ app.get('/profile/:username', requireToken, async (req, res) => {
   const start = Date.now();
   try {
     const profile = await limit(() => scrapeProfile(cleaned));
-    profileCache.set(cleaned, profile);
+    await cache.setProfile(cleaned, profile);
     const body: ProfileResponse = {
       profile,
       cached: false,
@@ -70,15 +74,21 @@ app.get('/profile/:username', requireToken, async (req, res) => {
   } catch (err) {
     if (err instanceof ScrapeError) {
       if (err.code === 'WAF_BLOCKED') {
-        negativeCache.set(cleaned, 'WAF');
+        await cache.setNegative(cleaned, 'WAF');
         logger.warn({ username: cleaned }, 'WAF blocked');
         res.status(503).json({ error: 'service_unavailable', detail: 'WAF_BLOCKED' });
         return;
       }
       if (err.code === 'PROFILE_NOT_FOUND') {
-        negativeCache.set(cleaned, 'NOT_FOUND');
+        await cache.setNegative(cleaned, 'NOT_FOUND');
         logger.info({ username: cleaned, msg: err.message }, 'profile not found');
         res.status(404).json({ error: 'not_found', detail: 'PROFILE_NOT_FOUND' });
+        return;
+      }
+      if (err.code === 'PROFILE_RESTRICTED') {
+        await cache.setNegative(cleaned, 'RESTRICTED');
+        logger.info({ username: cleaned, msg: err.message }, 'profile restricted');
+        res.status(403).json({ error: 'forbidden', detail: 'PROFILE_RESTRICTED' });
         return;
       }
       logger.error({ username: cleaned, msg: err.message, code: err.code }, 'scrape error');
@@ -105,6 +115,7 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'shutdown initiated');
     server.close(() => logger.info('http server closed'));
     workerPool.shutdown();
+    void cache.shutdown();
     setTimeout(() => process.exit(0), 2000).unref();
   };
   process.on('SIGINT', () => shutdown('SIGINT'));

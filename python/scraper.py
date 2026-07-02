@@ -5,9 +5,9 @@ import json
 import re
 import sys
 import time
-from typing import Any
 
 import requests
+from profile_parse import classify_user_detail
 
 REHYDRATE_RE = re.compile(
     r'<script[^>]*id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([^<]+)</script>',
@@ -18,51 +18,6 @@ DEFAULT_UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
-
-
-def parse_count(raw: str | None) -> int | None:
-    if not raw:
-        return None
-    s = raw.strip().upper().replace(",", "")
-    m = re.match(r"^([\d.]+)\s*([KMB])?$", s)
-    if not m:
-        try:
-            return int(s)
-        except ValueError:
-            return None
-    num = float(m.group(1))
-    mult = {"K": 1_000, "M": 1_000_000, "B": 1_000_000_000}.get(m.group(2) or "", 1)
-    return int(round(num * mult))
-
-
-def to_int(v: Any) -> int | None:
-    try:
-        return int(v)
-    except (TypeError, ValueError):
-        return None
-
-
-def extract_profile(payload: dict, fallback_username: str) -> dict | None:
-    detail = payload.get("__DEFAULT_SCOPE__", {}).get("webapp.user-detail", {})
-    user_info = detail.get("userInfo") or {}
-    user = user_info.get("user") or {}
-    stats = user_info.get("stats") or user_info.get("statsV2") or {}
-    unique_id = user.get("uniqueId") or fallback_username
-    if not unique_id:
-        return None
-    return {
-        "username": unique_id,
-        "name": (user.get("nickname") or unique_id).strip(),
-        "avatar_url": user.get("avatarLarger")
-        or user.get("avatarMedium")
-        or user.get("avatarThumb"),
-        "bio": (user.get("signature") or "").strip() or None,
-        "verified": bool(user.get("verified")),
-        "follower_count": to_int(stats.get("followerCount")),
-        "following_count": to_int(stats.get("followingCount")),
-        "like_count": to_int(stats.get("heartCount") or stats.get("heart")),
-        "region": user.get("region"),
-    }
 
 
 def is_waf_html(html: str) -> bool:
@@ -98,9 +53,11 @@ def scrape_http(username: str, timeout: int, user_agent: str) -> dict:
 
     m = REHYDRATE_RE.search(r.text)
     if not m:
+        # Bot/consent shell without the data script: not proof of a missing
+        # account (real not-found pages render it with statusCode=10221).
         return {
             "error": {
-                "code": "PROFILE_NOT_FOUND",
+                "code": "SCRAPE_ERROR",
                 "message": "rehydration script absent",
             }
         }
@@ -109,16 +66,7 @@ def scrape_http(username: str, timeout: int, user_agent: str) -> dict:
     except json.JSONDecodeError as e:
         return {"error": {"code": "SCRAPE_ERROR", "message": f"bad json: {e}"}}
 
-    detail = payload.get("__DEFAULT_SCOPE__", {}).get("webapp.user-detail", {})
-    if detail.get("statusCode") not in (None, 0):
-        return {
-            "error": {"code": "PROFILE_NOT_FOUND", "message": f"statusCode={detail.get('statusCode')}"}
-        }
-
-    profile = extract_profile(payload, username)
-    if not profile:
-        return {"error": {"code": "PROFILE_NOT_FOUND", "message": "no userInfo"}}
-    return {"profile": profile}
+    return classify_user_detail(payload, username)
 
 
 def scrape_selenium(
@@ -177,7 +125,7 @@ def scrape_selenium(
                 )
             )
         except TimeoutException:
-            return {"error": {"code": "PROFILE_NOT_FOUND", "message": "no rehydrate"}}
+            return {"error": {"code": "TIMEOUT", "message": "no rehydrate"}}
 
         if is_waf_html(d.page_source):
             return {"error": {"code": "WAF_BLOCKED", "message": "WAF in page"}}
@@ -187,16 +135,13 @@ def scrape_selenium(
             "return el?el.textContent:null;"
         )
         if not script_text:
-            return {"error": {"code": "PROFILE_NOT_FOUND", "message": "empty rehydrate"}}
+            return {"error": {"code": "SCRAPE_ERROR", "message": "empty rehydrate"}}
         try:
             payload = json.loads(script_text)
         except json.JSONDecodeError as e:
             return {"error": {"code": "SCRAPE_ERROR", "message": f"bad json: {e}"}}
 
-        profile = extract_profile(payload, username)
-        if not profile:
-            return {"error": {"code": "PROFILE_NOT_FOUND", "message": "no userInfo"}}
-        return {"profile": profile}
+        return classify_user_detail(payload, username)
     finally:
         try:
             d.quit()
@@ -223,7 +168,7 @@ def scrape(
         return result
 
     code = result.get("error", {}).get("code")
-    if code in ("WAF_BLOCKED", "PROFILE_NOT_FOUND", "SCRAPE_ERROR"):
+    if code in ("WAF_BLOCKED", "PROFILE_NOT_FOUND", "SCRAPE_ERROR", "TIMEOUT"):
         sel = scrape_selenium(username, timeout, executable_path, user_agent)
         if "profile" in sel:
             sel["mode"] = "selenium"

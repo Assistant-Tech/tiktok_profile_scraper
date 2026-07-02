@@ -44,6 +44,9 @@ class PythonWorker {
     if (config.EXECUTABLE_PATH) {
       args.push("--executable-path", config.EXECUTABLE_PATH);
     }
+    if (config.TIKTOK_COOKIES_PATH) {
+      args.push("--cookies-path", config.TIKTOK_COOKIES_PATH);
+    }
 
     logger.info({ args }, "spawning python worker");
     const child = spawn(config.PYTHON_BIN, args, {

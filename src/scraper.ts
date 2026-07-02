@@ -17,7 +17,12 @@ function jitter(min: number, max: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-type WorkerErrorCode = 'WAF_BLOCKED' | 'PROFILE_NOT_FOUND' | 'SCRAPE_ERROR' | 'TIMEOUT';
+type WorkerErrorCode =
+  | 'WAF_BLOCKED'
+  | 'PROFILE_NOT_FOUND'
+  | 'PROFILE_RESTRICTED'
+  | 'SCRAPE_ERROR'
+  | 'TIMEOUT';
 
 export async function scrapeProfile(username: string): Promise<ScrapedProfile> {
   let lastErr: ScrapeError | null = null;
