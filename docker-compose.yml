@@ -1,0 +1,24 @@
+services:
+  scraper:
+    build: .
+    image: tiktok-scraper-service
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${PORT:-8080}:8080"
+    # Chromium needs more shared memory than Docker's 64MB default.
+    shm_size: "1gb"
+    # Mount the cookie file read-only so the live session is never baked into
+    # the image. Matches TIKTOK_COOKIES_PATH=python/cookies.json in .env.
+    volumes:
+      - ./python/cookies.json:/app/python/cookies.json:ro
+    # Lets REDIS_URL point at a Redis running on the host, e.g.
+    #   REDIS_URL=redis://host.docker.internal:6379/0
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s

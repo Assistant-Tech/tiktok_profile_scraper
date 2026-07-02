@@ -3,6 +3,7 @@ dist
 .git
 .gitignore
 .env
+python/cookies.json
 *.log
 README.md
 python/.venv
